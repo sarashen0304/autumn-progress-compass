@@ -252,7 +252,7 @@
         <p class="subtitle">今天也别忘了跟进重要机会</p>
       </div>
       <div class="top-actions">
-        <button class="btn" id="exportBtn" type="button" title="导出数据"><span class="icon">⇩</span>导出数据</button>
+        <button class="btn" id="exportBtn" type="button" title="导出 Excel"><span class="icon">⇩</span>导出数据</button>
         <button class="btn" id="captureUrlBtn" type="button" title="识别投递网址"><span class="icon">⌁</span>识别投递网址</button>
         <button class="btn btn-primary" id="addBtn" type="button" title="新增投递"><span class="icon">＋</span>新增投递</button>
       </div>
@@ -352,8 +352,6 @@
       // 永久兼容约定：后续版本不得更改或复用此键；字段升级统一通过 normalizeRecord 迁移。
       const STORAGE_KEY = 'autumnRecruitmentTracker.records.v1';
       const CLEAN_SLATE_KEY = 'autumnRecruitmentTracker.cleanSlate.2026-08-11.v1';
-      const SCHEMA_VERSION = 1;
-      const APP_VERSION = '2.5.0';
       const $ = (selector) => document.querySelector(selector);
       const els = {
         total: $('#totalCount'), today: $('#todayCount'), active: $('#activeCount'), week: $('#weekCount'), offer: $('#offerCount'),
@@ -420,26 +418,13 @@
         }
       }
 
-      function createEnvelope(sourceRecords = records) {
-        return {
-          schemaVersion: SCHEMA_VERSION,
-          appVersion: APP_VERSION,
-          savedAt: new Date().toISOString(),
-          recordCount: sourceRecords.length,
-          records: sourceRecords.map(record => ({ ...record }))
-        };
+      function escapeExcelCell(value) {
+        const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' };
+        return String(value ?? '').replace(/[&<>"']/g, character => entities[character]);
       }
 
-      function downloadPayload(payload, filename) {
-        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      function excelRow(values, styleId = '') {
+        return `<Row>${values.map(value => `<Cell${styleId ? ` ss:StyleID="${styleId}"` : ''}><Data ss:Type="String">${escapeExcelCell(value)}</Data></Cell>`).join('')}</Row>`;
       }
 
       function escapeHtml(value) {
@@ -717,8 +702,45 @@
 
       function exportData() {
         const date = localDateInput(new Date());
-        downloadPayload(createEnvelope(records), `秋招投递记录-${date}.json`);
-        showToast(`已导出 ${records.length} 条记录，原数据未改变`);
+        const headers = ['公司', '岗位', '城市', '投递日期', '当前阶段', '安排时间', '投递网址', '最近安排', '下一步行动', '更新时间'];
+        const rows = records.map(record => [
+          record.company,
+          record.position,
+          record.city,
+          record.applicationDate,
+          record.stage,
+          record.scheduleAt,
+          record.applicationUrl,
+          record.recentSchedule,
+          record.nextAction,
+          new Date(record.updatedAt).toLocaleString('zh-CN', { hour12: false })
+        ]);
+        const worksheetRows = [excelRow(headers, 'Header'), ...rows.map(row => excelRow(row))].join('');
+        const workbook = `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Styles>
+  <Style ss:ID="Default" ss:Name="Normal"><Alignment ss:Vertical="Center"/><Font ss:FontName="Microsoft YaHei" ss:Size="11"/></Style>
+  <Style ss:ID="Header"><Font ss:FontName="Microsoft YaHei" ss:Size="11" ss:Bold="1"/><Interior ss:Color="#E5EBE2" ss:Pattern="Solid"/></Style>
+ </Styles>
+ <Worksheet ss:Name="投递记录"><Table>
+  <Column ss:Width="110"/><Column ss:Width="130"/><Column ss:Width="75"/><Column ss:Width="90"/><Column ss:Width="80"/>
+  <Column ss:Width="125"/><Column ss:Width="220"/><Column ss:Width="170"/><Column ss:Width="200"/><Column ss:Width="135"/>
+  ${worksheetRows}
+ </Table></Worksheet>
+</Workbook>`;
+        const blob = new Blob(['\ufeff', workbook], { type: 'application/vnd.ms-excel;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `秋招投递记录-${date}.xls`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast(`已导出 ${records.length} 条 Excel 记录，原数据未改变`);
       }
 
       function showToast(message) {
