@@ -351,8 +351,9 @@
       const STAGES = ['待投递', '已投递', '笔试', '一面', '二面', 'HR面', 'Offer', '已结束'];
       // 永久兼容约定：后续版本不得更改或复用此键；字段升级统一通过 normalizeRecord 迁移。
       const STORAGE_KEY = 'autumnRecruitmentTracker.records.v1';
+      const CLEAN_SLATE_KEY = 'autumnRecruitmentTracker.cleanSlate.2026-08-11.v1';
       const SCHEMA_VERSION = 1;
-      const APP_VERSION = '2.4.0';
+      const APP_VERSION = '2.5.0';
       const $ = (selector) => document.querySelector(selector);
       const els = {
         total: $('#totalCount'), today: $('#todayCount'), active: $('#activeCount'), week: $('#weekCount'), offer: $('#offerCount'),
@@ -367,33 +368,11 @@
       let bridgeCheckTimer;
       let captureTimer;
 
-      function dateOffset(days, hour = 10, minute = 0) {
-        const d = new Date();
-        d.setHours(hour, minute, 0, 0);
-        d.setDate(d.getDate() + days);
-        return d;
-      }
-
       function localDateInput(date) {
         const y = date.getFullYear();
         const m = String(date.getMonth() + 1).padStart(2, '0');
         const d = String(date.getDate()).padStart(2, '0');
         return `${y}-${m}-${d}`;
-      }
-
-      function localDateTimeInput(date) {
-        return `${localDateInput(date)}T${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-      }
-
-      function exampleRecords() {
-        const now = Date.now();
-        return [
-          { id: cryptoId(), company: '星海科技', position: '产品经理校招生', city: '上海', applicationDate: localDateInput(dateOffset(-12)), stage: '一面', scheduleAt: localDateTimeInput(dateOffset(1, 14, 0)), recentSchedule: '线上一面', nextAction: '梳理项目经历，准备三分钟自我介绍', updatedAt: now - 2000 },
-          { id: cryptoId(), company: '山岚智能', position: '算法工程师', city: '北京', applicationDate: localDateInput(dateOffset(-18)), stage: '笔试', scheduleAt: localDateTimeInput(dateOffset(3, 19, 0)), recentSchedule: '在线笔试', nextAction: '复习动态规划与概率题', updatedAt: now - 5000 },
-          { id: cryptoId(), company: '青禾互娱', position: '用户运营', city: '杭州', applicationDate: localDateInput(dateOffset(-7)), stage: '已投递', scheduleAt: localDateTimeInput(dateOffset(5, 10, 30)), recentSchedule: '邮件跟进招聘进度', nextAction: '检查邮箱并准备补充作品集', updatedAt: now - 8000 },
-          { id: cryptoId(), company: '远帆咨询', position: '商业分析顾问', city: '深圳', applicationDate: localDateInput(dateOffset(-28)), stage: '二面', scheduleAt: localDateTimeInput(dateOffset(8, 15, 0)), recentSchedule: '业务负责人面试', nextAction: '练习市场规模估算案例', updatedAt: now - 12000 },
-          { id: cryptoId(), company: '拾光设计', position: '交互设计师', city: '广州', applicationDate: localDateInput(dateOffset(-33)), stage: 'Offer', scheduleAt: '', recentSchedule: '已收到录用通知', nextAction: '确认入职时间并回复邮件', updatedAt: now - 15000 }
-        ];
       }
 
       function cryptoId() {
@@ -402,6 +381,10 @@
 
       function loadRecords() {
         try {
+          if (localStorage.getItem(CLEAN_SLATE_KEY) !== 'done') {
+            localStorage.removeItem(STORAGE_KEY);
+            localStorage.setItem(CLEAN_SLATE_KEY, 'done');
+          }
           const raw = localStorage.getItem(STORAGE_KEY);
           if (raw !== null) {
             const parsed = JSON.parse(raw);
@@ -412,7 +395,7 @@
         } catch (error) {
           console.warn('无法读取本地记录', error);
         }
-        const initial = exampleRecords();
+        const initial = [];
         try { localStorage.setItem(STORAGE_KEY, JSON.stringify(initial)); } catch (error) { console.warn(error); }
         return initial;
       }
