@@ -300,7 +300,7 @@
       </section>
 
       <aside class="panel side-panel" id="upcoming" aria-labelledby="upcomingTitle">
-        <div class="panel-head"><div><h2 class="panel-title" id="upcomingTitle">未来安排</h2><div class="panel-caption">接下来最需要关注的 4 项</div></div></div>
+        <div class="panel-head"><div><h2 class="panel-title" id="upcomingTitle">未来安排</h2><div class="panel-caption" id="upcomingCaption">接下来最需要关注的 0 项</div></div></div>
         <div class="schedule-list" id="upcomingList"></div>
       </aside>
     </div>
@@ -358,7 +358,7 @@
       const els = {
         total: $('#totalCount'), today: $('#todayCount'), active: $('#activeCount'), week: $('#weekCount'), offer: $('#offerCount'),
         stageGrid: $('#stageGrid'), body: $('#recordBody'), empty: $('#emptyState'), caption: $('#resultCaption'),
-        upcoming: $('#upcomingList'), search: $('#searchInput'), filter: $('#stageFilter'), sort: $('#sortSelect'),
+        upcoming: $('#upcomingList'), upcomingCaption: $('#upcomingCaption'), search: $('#searchInput'), filter: $('#stageFilter'), sort: $('#sortSelect'),
         dialog: $('#recordDialog'), form: $('#recordForm'), dialogTitle: $('#dialogTitle'), toast: $('#toast')
       };
       let records = loadRecords();
@@ -552,6 +552,7 @@
           .filter(r => { const d = parseLocal(r.scheduleAt); return d && d >= now && !['Offer', '已结束'].includes(r.stage); })
           .sort((a, b) => parseLocal(a.scheduleAt) - parseLocal(b.scheduleAt))
           .slice(0, 4);
+        els.upcomingCaption.textContent = `接下来最需要关注的 ${upcoming.length} 项`;
         if (!upcoming.length) {
           els.upcoming.innerHTML = '<div class="side-empty">近期还没有安排<br>新增或编辑记录时可以填写安排时间</div>';
           return;
