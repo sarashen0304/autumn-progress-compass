@@ -254,7 +254,9 @@
       <div class="top-actions">
         <button class="btn" id="exportBtn" type="button" title="导出 Excel"><span class="icon">⇩</span>导出数据</button>
         <button class="btn" id="captureUrlBtn" type="button" title="识别投递网址"><span class="icon">⌁</span>识别投递网址</button>
+        <button class="btn btn-primary" id="importBtn" type="button" title="导入本站导出的 Excel"><span class="icon">⇧</span>导入数据</button>
         <button class="btn btn-primary" id="addBtn" type="button" title="新增投递"><span class="icon">＋</span>新增投递</button>
+        <input id="importFile" type="file" accept=".xls,application/vnd.ms-excel,application/xml,text/xml" hidden>
       </div>
     </header>
 
@@ -702,7 +704,7 @@
 
       function exportData() {
         const date = localDateInput(new Date());
-        const headers = ['公司', '岗位', '城市', '投递日期', '当前阶段', '安排时间', '投递网址', '最近安排', '下一步行动', '更新时间'];
+        const headers = ['公司', '岗位', '城市', '投递日期', '当前阶段', '安排时间', '投递网址', '最近安排', '下一步行动', '更新时间', '记录ID', '更新时间戳'];
         const rows = records.map(record => [
           record.company,
           record.position,
@@ -713,7 +715,9 @@
           record.applicationUrl,
           record.recentSchedule,
           record.nextAction,
-          new Date(record.updatedAt).toLocaleString('zh-CN', { hour12: false })
+          new Date(record.updatedAt).toLocaleString('zh-CN', { hour12: false }),
+          record.id,
+          record.updatedAt
         ]);
         const worksheetRows = [excelRow(headers, 'Header'), ...rows.map(row => excelRow(row))].join('');
         const workbook = `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?>
@@ -728,6 +732,7 @@
  <Worksheet ss:Name="投递记录"><Table>
   <Column ss:Width="110"/><Column ss:Width="130"/><Column ss:Width="75"/><Column ss:Width="90"/><Column ss:Width="80"/>
   <Column ss:Width="125"/><Column ss:Width="220"/><Column ss:Width="170"/><Column ss:Width="200"/><Column ss:Width="135"/>
+  <Column ss:Hidden="1"/><Column ss:Hidden="1"/>
   ${worksheetRows}
  </Table></Worksheet>
 </Workbook>`;
@@ -741,6 +746,53 @@
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
         showToast(`已导出 ${records.length} 条 Excel 记录，原数据未改变`);
+      }
+
+      function readExcelRows(xmlText) {
+        const documentXml = new DOMParser().parseFromString(xmlText.replace(/^\uFEFF/, ''), 'application/xml');
+        if (documentXml.querySelector('parsererror')) throw new Error('文件内容不是本站导出的 Excel 格式');
+        const rowElements = Array.from(documentXml.getElementsByTagNameNS('*', 'Row'));
+        return rowElements.map(row => Array.from(row.getElementsByTagNameNS('*', 'Cell')).map(cell => {
+          const data = cell.getElementsByTagNameNS('*', 'Data')[0];
+          return data ? data.textContent : '';
+        }));
+      }
+
+      async function importData(event) {
+        const file = event.target.files && event.target.files[0];
+        event.target.value = '';
+        if (!file) return;
+        try {
+          const tableRows = readExcelRows(await file.text());
+          const headers = tableRows.shift() || [];
+          const requiredHeaders = ['公司', '岗位', '城市', '投递日期', '当前阶段', '安排时间', '投递网址', '最近安排', '下一步行动'];
+          if (!requiredHeaders.every(header => headers.includes(header))) {
+            throw new Error('表头不匹配，请选择由本网站“导出数据”生成的 Excel 文件');
+          }
+          const imported = tableRows.filter(row => row.some(cell => String(cell).trim())).map(row => {
+            const item = Object.fromEntries(headers.map((header, index) => [header, row[index] || '']));
+            return normalizeRecord({
+              id: item['记录ID'] || cryptoId(),
+              company: item['公司'],
+              position: item['岗位'],
+              city: item['城市'],
+              applicationDate: item['投递日期'],
+              stage: item['当前阶段'],
+              scheduleAt: item['安排时间'],
+              applicationUrl: item['投递网址'],
+              recentSchedule: item['最近安排'],
+              nextAction: item['下一步行动'],
+              updatedAt: Number(item['更新时间戳']) || Date.parse(item['更新时间']) || Date.now()
+            });
+          });
+          if (!confirm(`将用 Excel 中的 ${imported.length} 条记录替换网页当前的 ${records.length} 条记录。\n确认导入吗？`)) return;
+          records = imported;
+          saveRecords();
+          render();
+          showToast(`已从 Excel 恢复 ${records.length} 条记录`);
+        } catch (error) {
+          alert(`导入失败：${error.message}`);
+        }
       }
 
       function showToast(message) {
@@ -778,6 +830,8 @@
       populateSelects();
       render();
       $('#addBtn').addEventListener('click', () => openDialog());
+      $('#importBtn').addEventListener('click', () => $('#importFile').click());
+      $('#importFile').addEventListener('change', importData);
       $('#captureUrlBtn').addEventListener('click', openCaptureDialog);
       $('#exportBtn').addEventListener('click', exportData);
       document.querySelectorAll('.nav-item[href]').forEach(link => {
