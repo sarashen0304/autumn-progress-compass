@@ -113,6 +113,20 @@
     .bar { height: 8px; background: #e9e3da; border-radius: 999px; overflow: hidden; }
     .bar-fill { height: 100%; min-width: 0; border-radius: inherit; background: var(--stage-color, var(--primary)); transition: width .25s ease; }
 
+    .deadline-panel { margin-bottom: 20px; }
+    .deadline-panel .panel-head { border-bottom: 0; padding-bottom: 12px; }
+    .deadline-add { width: 42px; padding: 0; font-size: 22px; line-height: 1; }
+    .deadline-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 0 22px 22px; }
+    .deadline-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; min-width: 0; padding: 15px 16px; border: 1px solid var(--line); border-radius: 13px; background: #fffdf8; }
+    .deadline-company { overflow: hidden; color: var(--ink); font-weight: 720; text-overflow: ellipsis; white-space: nowrap; }
+    .deadline-meta { display: flex; align-items: center; gap: 8px; margin-top: 7px; color: var(--muted); font-size: 12px; flex-wrap: wrap; }
+    .deadline-countdown { display: inline-flex; align-items: center; min-height: 25px; padding: 2px 9px; border-radius: 8px; color: var(--amber); background: var(--amber-soft); font-weight: 720; }
+    .deadline-countdown.urgent { color: var(--red); background: var(--red-soft); }
+    .deadline-countdown.passed { color: var(--muted); background: #ecebe6; }
+    .deadline-delete { width: 34px; height: 34px; padding: 0; border: 0; border-radius: 9px; color: var(--muted); background: transparent; font-size: 17px; }
+    .deadline-delete:hover { color: var(--red); background: var(--red-soft); }
+    .deadline-empty { grid-column: 1 / -1; padding: 24px 15px 28px; color: var(--muted); text-align: center; font-size: 14px; }
+
     .filters { display: grid; grid-template-columns: minmax(180px, 1fr) 150px 190px; gap: 10px; padding: 16px 22px; border-bottom: 1px solid var(--line); }
     .control { width: 100%; min-height: 42px; border: 1px solid var(--line); border-radius: 11px; padding: 9px 12px; color: var(--ink); background: #fffdf8; }
     .search-wrap { position: relative; }
@@ -187,6 +201,7 @@
       .dashboard { grid-template-columns: 1fr; }
       .side-panel { position: static; }
       .schedule-list { display: grid; grid-template-columns: repeat(2, 1fr); column-gap: 22px; }
+      .deadline-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 900px) {
       .app-layout { display: block; }
@@ -220,6 +235,7 @@
       .search-wrap { grid-column: auto; }
       .panel-head { padding: 17px; }
       .distribution { padding: 17px; }
+      .deadline-list { grid-template-columns: 1fr; padding: 0 17px 17px; }
       .stage-grid { grid-template-columns: repeat(2, 1fr); }
       .schedule-list { grid-template-columns: 1fr; }
       .form-grid { grid-template-columns: 1fr; }
@@ -273,6 +289,14 @@
         <div><h2 class="panel-title" id="distributionTitle">阶段分布</h2><div class="panel-caption">快速看看投递主要停留在哪一步</div></div>
       </div>
       <div class="stage-grid" id="stageGrid"></div>
+    </section>
+
+    <section class="panel deadline-panel" id="deadlines" aria-labelledby="deadlineTitle">
+      <div class="panel-head">
+        <div><h2 class="panel-title" id="deadlineTitle">截止投递 DDL</h2><div class="panel-caption">集中记录即将截止的投递机会 · 独立保存</div></div>
+        <button class="btn btn-primary deadline-add" id="addDeadlineBtn" type="button" aria-label="新增截止投递 DDL" title="新增截止投递 DDL">＋</button>
+      </div>
+      <div class="deadline-list" id="deadlineList"></div>
     </section>
 
     <div class="dashboard">
@@ -329,6 +353,20 @@
     </form>
   </dialog>
 
+  <dialog id="deadlineDialog">
+    <form id="deadlineForm">
+      <div class="modal-head"><h2>新增截止投递 DDL</h2><button class="close-btn" id="closeDeadlineDialog" type="button" aria-label="关闭">×</button></div>
+      <div class="form-body">
+        <div class="form-grid">
+          <div class="field"><label for="deadlineCompany">公司 <span class="required">*</span></label><input class="control" id="deadlineCompany" name="deadlineCompany" required maxlength="60" placeholder="例如：德勤"></div>
+          <div class="field"><label for="deadlinePosition">岗位 <span class="required">*</span></label><input class="control" id="deadlinePosition" name="deadlinePosition" required maxlength="80" placeholder="例如：审计与鉴证"></div>
+          <div class="field full"><label for="deadlineAt">截止时间 <span class="required">*</span></label><input class="control" id="deadlineAt" name="deadlineAt" type="datetime-local" required></div>
+        </div>
+      </div>
+      <div class="modal-actions"><button class="btn" id="cancelDeadlineDialog" type="button">取消</button><button class="btn btn-primary" type="submit">保存 DDL</button></div>
+    </form>
+  </dialog>
+
   <dialog id="captureDialog">
     <form id="captureForm">
       <div class="modal-head"><h2>识别投递详情页</h2><button class="close-btn" id="closeCaptureDialog" type="button" aria-label="关闭">×</button></div>
@@ -353,15 +391,18 @@
       const STAGES = ['待投递', '已投递', '笔试', '一面', '二面', 'HR面', 'Offer', '已结束'];
       // 永久兼容约定：后续版本不得更改或复用此键；字段升级统一通过 normalizeRecord 迁移。
       const STORAGE_KEY = 'autumnRecruitmentTracker.records.v1';
+      const DEADLINE_STORAGE_KEY = 'autumnRecruitmentTracker.deadlines.v1';
       const CLEAN_SLATE_KEY = 'autumnRecruitmentTracker.cleanSlate.2026-08-11.v1';
       const $ = (selector) => document.querySelector(selector);
       const els = {
         total: $('#totalCount'), today: $('#todayCount'), active: $('#activeCount'), week: $('#weekCount'), offer: $('#offerCount'),
         stageGrid: $('#stageGrid'), body: $('#recordBody'), empty: $('#emptyState'), caption: $('#resultCaption'),
         upcoming: $('#upcomingList'), upcomingCaption: $('#upcomingCaption'), search: $('#searchInput'), filter: $('#stageFilter'), sort: $('#sortSelect'),
+        deadlineList: $('#deadlineList'), deadlineDialog: $('#deadlineDialog'), deadlineForm: $('#deadlineForm'),
         dialog: $('#recordDialog'), form: $('#recordForm'), dialogTitle: $('#dialogTitle'), toast: $('#toast')
       };
       let records = loadRecords();
+      let deadlines = loadDeadlines();
       let editingId = null;
       let toastTimer;
       let bridgeReady = false;
@@ -417,6 +458,30 @@
           if (message) showToast(message);
         } catch (error) {
           alert('浏览器未能保存数据。请检查是否禁用了本地存储，或换一个浏览器重试。');
+        }
+      }
+
+      function loadDeadlines() {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(DEADLINE_STORAGE_KEY) || '[]');
+          if (Array.isArray(parsed)) return parsed.map(item => ({
+            id: String(item.id || cryptoId()),
+            company: String(item.company || ''),
+            position: String(item.position || ''),
+            deadlineAt: String(item.deadlineAt || '')
+          })).filter(item => item.company && item.position && parseLocal(item.deadlineAt));
+        } catch (error) {
+          console.warn('无法读取截止投递 DDL', error);
+        }
+        return [];
+      }
+
+      function saveDeadlines(message) {
+        try {
+          localStorage.setItem(DEADLINE_STORAGE_KEY, JSON.stringify(deadlines));
+          if (message) showToast(message);
+        } catch (error) {
+          alert('浏览器未能保存截止投递 DDL，请检查是否禁用了本地存储。');
         }
       }
 
@@ -481,6 +546,7 @@
       function render() {
         renderStats();
         renderDistribution();
+        renderDeadlines();
         renderTable();
         renderUpcoming();
       }
@@ -503,6 +569,67 @@
             <div class="stage-meta"><span>${escapeHtml(stage)}</span><strong>${counts[stage]}</strong></div>
             <div class="bar"><div class="bar-fill" data-stage="${escapeHtml(stage)}" style="width:${counts[stage] / max * 100}%"></div></div>
           </div>`).join('');
+      }
+
+      function deadlineCountdown(value) {
+        const difference = parseLocal(value).getTime() - Date.now();
+        if (difference < 0) return { text: '已截止', className: 'passed' };
+        const hours = Math.ceil(difference / 3600000);
+        if (hours <= 24) return { text: `剩 ${hours} 小时`, className: 'urgent' };
+        const days = Math.ceil(hours / 24);
+        return { text: `剩 ${days} 天`, className: days <= 3 ? 'urgent' : '' };
+      }
+
+      function renderDeadlines() {
+        const sorted = [...deadlines].sort((a, b) => parseLocal(a.deadlineAt) - parseLocal(b.deadlineAt));
+        if (!sorted.length) {
+          els.deadlineList.innerHTML = '<div class="deadline-empty">还没有截止投递 DDL，点击右上角“＋”添加</div>';
+          return;
+        }
+        els.deadlineList.innerHTML = sorted.map(item => {
+          const countdown = deadlineCountdown(item.deadlineAt);
+          return `<article class="deadline-card">
+            <div><div class="deadline-company">${escapeHtml(item.company)} · ${escapeHtml(item.position)}</div><div class="deadline-meta"><span>◷ ${escapeHtml(formatDateTime(item.deadlineAt))} 截止</span><span class="deadline-countdown ${countdown.className}">${countdown.text}</span></div></div>
+            <button class="deadline-delete" type="button" data-deadline-id="${escapeHtml(item.id)}" aria-label="删除 ${escapeHtml(item.company)}的截止时间" title="删除">×</button>
+          </article>`;
+        }).join('');
+      }
+
+      function openDeadlineDialog() {
+        els.deadlineForm.reset();
+        const tomorrow = new Date(Date.now() + 86400000);
+        tomorrow.setMinutes(0, 0, 0);
+        $('#deadlineAt').value = `${localDateInput(tomorrow)}T${String(tomorrow.getHours()).padStart(2, '0')}:00`;
+        els.deadlineDialog.showModal();
+        $('#deadlineCompany').focus();
+      }
+
+      function closeDeadlineDialog() {
+        els.deadlineDialog.close();
+      }
+
+      function submitDeadline(event) {
+        event.preventDefault();
+        const formData = new FormData(els.deadlineForm);
+        deadlines.push({
+          id: cryptoId(),
+          company: String(formData.get('deadlineCompany')).trim(),
+          position: String(formData.get('deadlinePosition')).trim(),
+          deadlineAt: String(formData.get('deadlineAt'))
+        });
+        saveDeadlines('截止投递 DDL 已添加');
+        closeDeadlineDialog();
+        renderDeadlines();
+      }
+
+      function deleteDeadline(event) {
+        const button = event.target.closest('[data-deadline-id]');
+        if (!button) return;
+        const item = deadlines.find(deadline => deadline.id === button.dataset.deadlineId);
+        if (!item || !confirm(`确定删除「${item.company} · ${item.position}」的截止时间吗？`)) return;
+        deadlines = deadlines.filter(deadline => deadline.id !== item.id);
+        saveDeadlines('截止投递 DDL 已删除');
+        renderDeadlines();
       }
 
       function renderTable() {
@@ -830,6 +957,12 @@
       populateSelects();
       render();
       $('#addBtn').addEventListener('click', () => openDialog());
+      $('#addDeadlineBtn').addEventListener('click', openDeadlineDialog);
+      $('#closeDeadlineDialog').addEventListener('click', closeDeadlineDialog);
+      $('#cancelDeadlineDialog').addEventListener('click', closeDeadlineDialog);
+      els.deadlineForm.addEventListener('submit', submitDeadline);
+      els.deadlineList.addEventListener('click', deleteDeadline);
+      els.deadlineDialog.addEventListener('click', event => { if (event.target === els.deadlineDialog) closeDeadlineDialog(); });
       $('#importBtn').addEventListener('click', () => $('#importFile').click());
       $('#importFile').addEventListener('change', importData);
       $('#captureUrlBtn').addEventListener('click', openCaptureDialog);
