@@ -847,6 +847,9 @@
           record.updatedAt
         ]);
         const worksheetRows = [excelRow(headers, 'Header'), ...rows.map(row => excelRow(row))].join('');
+        const deadlineHeaders = ['公司', '岗位', '截止时间', 'DDL记录ID'];
+        const deadlineRows = deadlines.map(item => [item.company, item.position, item.deadlineAt, item.id]);
+        const deadlineWorksheetRows = [excelRow(deadlineHeaders, 'Header'), ...deadlineRows.map(row => excelRow(row))].join('');
         const workbook = `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?>
 <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
  xmlns:o="urn:schemas-microsoft-com:office:office"
@@ -862,6 +865,10 @@
   <Column ss:Hidden="1"/><Column ss:Hidden="1"/>
   ${worksheetRows}
  </Table></Worksheet>
+ <Worksheet ss:Name="截止投递 DDL"><Table>
+  <Column ss:Width="120"/><Column ss:Width="160"/><Column ss:Width="135"/><Column ss:Hidden="1"/>
+  ${deadlineWorksheetRows}
+ </Table></Worksheet>
 </Workbook>`;
         const blob = new Blob(['\ufeff', workbook], { type: 'application/vnd.ms-excel;charset=utf-8' });
         const url = URL.createObjectURL(blob);
@@ -872,16 +879,20 @@
         link.click();
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
-        showToast(`已导出 ${records.length} 条 Excel 记录，原数据未改变`);
+        showToast(`已导出 ${records.length} 条投递记录和 ${deadlines.length} 条 DDL，原数据未改变`);
       }
 
-      function readExcelRows(xmlText) {
+      function readExcelSheets(xmlText) {
         const documentXml = new DOMParser().parseFromString(xmlText.replace(/^\uFEFF/, ''), 'application/xml');
         if (documentXml.querySelector('parsererror')) throw new Error('文件内容不是本站导出的 Excel 格式');
-        const rowElements = Array.from(documentXml.getElementsByTagNameNS('*', 'Row'));
-        return rowElements.map(row => Array.from(row.getElementsByTagNameNS('*', 'Cell')).map(cell => {
-          const data = cell.getElementsByTagNameNS('*', 'Data')[0];
-          return data ? data.textContent : '';
+        return Object.fromEntries(Array.from(documentXml.getElementsByTagNameNS('*', 'Worksheet')).map((worksheet, index) => {
+          const name = worksheet.getAttributeNS('urn:schemas-microsoft-com:office:spreadsheet', 'Name') || worksheet.getAttribute('ss:Name') || `Sheet${index + 1}`;
+          const rowElements = Array.from(worksheet.getElementsByTagNameNS('*', 'Row'));
+          const rows = rowElements.map(row => Array.from(row.getElementsByTagNameNS('*', 'Cell')).map(cell => {
+            const data = cell.getElementsByTagNameNS('*', 'Data')[0];
+            return data ? data.textContent : '';
+          }));
+          return [name, rows];
         }));
       }
 
@@ -890,7 +901,8 @@
         event.target.value = '';
         if (!file) return;
         try {
-          const tableRows = readExcelRows(await file.text());
+          const sheets = readExcelSheets(await file.text());
+          const tableRows = [...(sheets['投递记录'] || sheets.Sheet1 || [])];
           const headers = tableRows.shift() || [];
           const requiredHeaders = ['公司', '岗位', '城市', '投递日期', '当前阶段', '安排时间', '投递网址', '最近安排', '下一步行动'];
           if (!requiredHeaders.every(header => headers.includes(header))) {
@@ -912,11 +924,38 @@
               updatedAt: Number(item['更新时间戳']) || Date.parse(item['更新时间']) || Date.now()
             });
           });
-          if (!confirm(`将用 Excel 中的 ${imported.length} 条记录替换网页当前的 ${records.length} 条记录。\n确认导入吗？`)) return;
+          let importedDeadlines = null;
+          const deadlineTableRows = sheets['截止投递 DDL'] ? [...sheets['截止投递 DDL']] : null;
+          if (deadlineTableRows) {
+            const deadlineHeaders = deadlineTableRows.shift() || [];
+            const requiredDeadlineHeaders = ['公司', '岗位', '截止时间'];
+            if (!requiredDeadlineHeaders.every(header => deadlineHeaders.includes(header))) {
+              throw new Error('“截止投递 DDL”工作表的表头不匹配');
+            }
+            importedDeadlines = deadlineTableRows.filter(row => row.some(cell => String(cell).trim())).map(row => {
+              const item = Object.fromEntries(deadlineHeaders.map((header, index) => [header, row[index] || '']));
+              return {
+                id: String(item['DDL记录ID'] || cryptoId()),
+                company: String(item['公司'] || ''),
+                position: String(item['岗位'] || ''),
+                deadlineAt: String(item['截止时间'] || '')
+              };
+            }).filter(item => item.company && item.position && parseLocal(item.deadlineAt));
+          }
+          const ddlMessage = importedDeadlines === null
+            ? '\n此旧版备份没有 DDL 工作表，网页当前的 DDL 将保持不变。'
+            : `\n同时用 ${importedDeadlines.length} 条 DDL 替换当前的 ${deadlines.length} 条 DDL。`;
+          if (!confirm(`将用 Excel 中的 ${imported.length} 条记录替换网页当前的 ${records.length} 条记录。${ddlMessage}\n确认导入吗？`)) return;
           records = imported;
           saveRecords();
+          if (importedDeadlines !== null) {
+            deadlines = importedDeadlines;
+            saveDeadlines();
+          }
           render();
-          showToast(`已从 Excel 恢复 ${records.length} 条记录`);
+          showToast(importedDeadlines === null
+            ? `已从旧版 Excel 恢复 ${records.length} 条记录，DDL 保持不变`
+            : `已恢复 ${records.length} 条投递记录和 ${deadlines.length} 条 DDL`);
         } catch (error) {
           alert(`导入失败：${error.message}`);
         }
